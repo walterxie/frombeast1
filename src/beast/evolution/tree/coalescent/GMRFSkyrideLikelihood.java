@@ -54,10 +54,14 @@ import java.util.List;
  * @author Erik Bloomquist
  * @author Vladimir Minin
  * @author Marc Suchard
- * @version $Id: GMRFSkylineLikelihood.java,v 1.3 2007/03/20 22:40:04 msuchard Exp $
+ *
+ * Imported on 20 June 2018
  */
-@Description("A likelihood function for a Gaussian Markov random field on a log population size trajectory")
-@Citation("Minin, Bloomquist and Suchard (2008) Molecular Biology and Evolution, 25, 1459-1471")
+@Description("Bayesian skyride: a likelihood function for a Gaussian Markov random field on a log population size trajectory")
+@Citation(value="Minin, V. N., Bloomquist, E. W., & Suchard, M. A. (2008).\n" +
+        "Smooth skyride through a rough skyline: Bayesian coalescent-based inference of population dynamics.\n" +
+        "Molecular biology and evolution, 25(7), 1459-1471.",
+        year = 2008, firstAuthorSurname = "Minin", DOI="10.1093/molbev/msn090")
 public class GMRFSkyrideLikelihood extends TreeDistribution  {
     public Input<RealParameter> groupParameterInput = new Input<RealParameter>("groupSizes","",Validate.REQUIRED);
     public Input<RealParameter> popSizeParameterInput = new Input<RealParameter>("populationSizes","",Validate.REQUIRED);
