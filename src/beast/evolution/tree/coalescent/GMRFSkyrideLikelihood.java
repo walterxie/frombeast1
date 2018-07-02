@@ -31,17 +31,14 @@ import beast.core.Description;
 import beast.core.Input;
 import beast.core.Input.Validate;
 import beast.core.parameter.RealParameter;
+import beast.core.util.Log;
 import beast.evolution.operators.CompoundParameterHelper;
 import beast.evolution.tree.Node;
 import beast.evolution.tree.Tree;
-import beast.evolution.tree.TreeDistribution;
 import beast.util.Randomizer;
 import no.uib.cipr.matrix.DenseVector;
-import no.uib.cipr.matrix.NotConvergedException;
-import no.uib.cipr.matrix.SymmTridiagEVD;
 import no.uib.cipr.matrix.SymmTridiagMatrix;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -62,13 +59,16 @@ import java.util.List;
         "Smooth skyride through a rough skyline: Bayesian coalescent-based inference of population dynamics.\n" +
         "Molecular biology and evolution, 25(7), 1459-1471.",
         year = 2008, firstAuthorSurname = "Minin", DOI="10.1093/molbev/msn090")
-public class GMRFSkyrideLikelihood extends TreeDistribution  {
-    public Input<RealParameter> groupParameterInput = new Input<RealParameter>("groupSizes","",Validate.REQUIRED);
-    public Input<RealParameter> popSizeParameterInput = new Input<RealParameter>("populationSizes","",Validate.REQUIRED);
-    public Input<RealParameter> precParameterInput = new Input<RealParameter>("precisionParameter","",Validate.REQUIRED);
-    public Input<RealParameter> lambdaInput = new Input<RealParameter>("lambda","");
+public class GMRFSkyrideLikelihood extends OldAbstractCoalescentLikelihood {//TreeDistribution  {
+    public Input<RealParameter> groupParameterInput = new Input<RealParameter>("groupSizes","present-day population size.",Validate.REQUIRED);
+    public Input<RealParameter> popSizeParameterInput = new Input<RealParameter>("populationSizes","the group sizes parameter",Validate.REQUIRED);
+    public Input<RealParameter> precParameterInput = new Input<RealParameter>("precisionParameter","precision parameter",Validate.REQUIRED);
+    public Input<RealParameter> lambdaParameterInput = new Input<RealParameter>("lambda","lambda");
+//    public Input<RealParameter> betaParameterInput = new Input<RealParameter>("beta","beta of regression coefficient");
     public Input<Boolean> timeAwareSmoothingInput = new Input<Boolean>("timeAwareSmoothing","use time Aware Smoothing", false);
     public Input<Boolean> rescaleByRootHeightInput = new Input<Boolean>("rescaleByRootHeightInput","rescale By Root Height", false);
+
+//    public Input<CompoundParameterHelper> dMatrixInput = new Input<>("covariateMatrix","covariate matrix");
 
     public GMRFSkyrideLikelihood() {
 		//popSizeInput.setRule(Validate.OPTIONAL);
@@ -102,28 +102,26 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
 	protected boolean timeAwareSmoothing = TIME_AWARE_IS_ON_BY_DEFAULT;
     protected boolean rescaleByRootHeight;
     
-    Tree tree;
-    TreeIntervals intervals;
-    private TreeIntervals storedIntervals;
-    protected boolean likelihoodKnown = false;
-
+//    Tree tree;
+//    TreeIntervals treeIntervals;
     /**
-     * The widths of the intervals.
+     * The widths of the treeIntervals.
      */
-//    double[] intervals;
+//    double[] treeIntervals;
 //    private double[] storedIntervals;
-
     /**
      * The number of uncoalesced lineages within a particular interval.
      */
-    int[] lineageCounts;
-    private int[] storedLineageCounts;
+//    int[] lineageCounts;
+//    private int[] storedLineageCounts;
+//
+//    boolean intervalsKnown = false;
+//    private boolean storedIntervalsKnown = false;
+//
+//    int intervalCount = 0;
+//    private int storedIntervalCount = 0;
 
-    boolean intervalsKnown = false;
-    private boolean storedIntervalsKnown = false;
-
-    int intervalCount = 0;
-    private int storedIntervalCount = 0;
+//    protected boolean likelihoodKnown = false;
 
 
 //    private static List<Tree> wrapTree(Tree tree) {
@@ -136,23 +134,31 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
     @Override
     public void initAndValidate() {
         if (treeInput.get() != null) {
-            throw new IllegalArgumentException("only tree intervals (not tree) be specified");
+            throw new IllegalArgumentException("only tree treeIntervals (not tree) be specified");
         }
-        intervals = treeIntervalsInput.get();
+        treeIntervals = treeIntervalsInput.get();
 
 		this.popSizeParameter = popSizeParameterInput.get();
 		this.groupSizeParameter = groupParameterInput.get();
+        if (popSizeParameter.getDimension() != groupSizeParameter.getDimension())
+            throw new IllegalArgumentException("Population and group size parameters must have the same length");
+
 		this.precisionParameter = precParameterInput.get();
-		this.lambdaParameter = lambdaInput.get();
+
+		this.lambdaParameter = lambdaParameterInput.get();
 		if (lambdaParameter == null) {
 			lambdaParameter = new RealParameter();
 			lambdaParameter.initByName("value","1.0", "estimate", false);
 		}
-		this.betaParameter = betaInput.get();
-		this.dMatrix = dMatrixInput.get();
-		if (dMatrix == null) {
-			dMatrix = new RealParameter("1.0");
-		}
+//		this.betaParameter = betaParameterInput.get();
+//		this.dMatrix = dMatrixInput.get();
+//		if (dMatrix != null) {
+//            if (dMatrix.getRowDimension() != popParameter.getDimension())
+//                throw new XMLParseException("Design matrix row dimension must equal the population parameter length.");
+//            if (dMatrix.getColumnDimension() != betaParameter.getDimension())
+//                throw new XMLParseException("Design matrix column dimension must equal the regression coefficient length.");
+//        }
+
 		this.timeAwareSmoothing = timeAwareSmoothingInput.get();
         this.rescaleByRootHeight = rescaleByRootHeightInput.get();
 
@@ -163,6 +169,7 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
         if (popSizeParameter.getDimension() <= 1) {
             // popSize dimension hasn't been set yet, set it here:
             popSizeParameter.setDimension(correctFieldLength);
+            Log.warning("popSize dimension hasn't been set yet, set to " + correctFieldLength);
         }
 
 		fieldLength = popSizeParameter.getDimension();
@@ -189,23 +196,17 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
 //			for (int i = 0; i < groupSizeParameter.getDimension(); i++)
 //				groupSizeParameter.setValue(i, 1.0);
 		}
-		
+
         super.initAndValidate();
 	}
 
-    @Override
-    public double calculateLogP() {
-    	logP = getLogLikelihood();
-    	return logP;
-    }    
-    
+
     protected int getCorrectFieldLength() {
         return tree.getLeafNodeCount() - 1;
     }
 
     protected void wrapSetupIntervals() {
     	setupIntervals();
-    	//super.intervals.calculateIntervals();
     }
 
     protected void setTree(List<Tree> treeList) {
@@ -261,15 +262,16 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
 
 	}
 
-	// **************************************************************
+    // **************************************************************
 	// Likelihood IMPLEMENTATION
 	// **************************************************************
-	public double getLogLikelihood() {
-		if (!likelihoodKnown) {
+    @Override
+    public double calculateLogP() {
+//		if (!likelihoodKnown) {
 			logP = calculateLogCoalescentLikelihood();
             logFieldLikelihood = calculateLogFieldLikelihood();
-			likelihoodKnown = true;
-		}
+//			likelihoodKnown = true;
+//		}
 		return logP + logFieldLikelihood;
 	}
 
@@ -286,35 +288,18 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
     }
 
     public String toString() {
-        return getID() + "(" + Double.toString(getLogLikelihood()) + ")";
+        return getID() + "(" + Double.toString(logP + logFieldLikelihood) + ")";
     }
 
-//    protected void setupSufficientStatistics() {
-//        int index = 0;
-//
-//        double length = 0;
-//        double weight = 0;
-//        for (int i = 0; i < getIntervalCount(); i++) {
-//            length += getInterval(i);
-//            weight += getInterval(i) * getLineageCount(i) * (getLineageCount(i) - 1);
-//            if (getIntervalType(i) == CoalescentEventType.COALESCENT) {
-//                coalescentIntervals[index] = length;
-//                sufficientStatistics[index] = weight / 2.0;
-//                index++;
-//                length = 0;
-//                weight = 0;
-//            }
-//        }
-//    }
     protected void setupSufficientStatistics() {
 	    int index = 0;
 
 		double length = 0;
 		double weight = 0;
-		for (int i = 0; i < getIntervalCount(); i++) {
-			length += getInterval(i);
-			weight += getInterval(i) * getLineageCount(i) * (getLineageCount(i) - 1);
-			if (getIntervalType(i) == IntervalType.COALESCENT) {
+		for (int i = 0; i < treeIntervals.getIntervalCount(); i++) {
+			length += treeIntervals.getInterval(i);
+			weight += treeIntervals.getInterval(i) * treeIntervals.getLineageCount(i) * (treeIntervals.getLineageCount(i) - 1);
+			if (treeIntervals.getIntervalType(i) == IntervalType.COALESCENT) {
 				coalescentIntervals[index] = length;
 				sufficientStatistics[index] = weight / 2.0;
 				index++;
@@ -403,10 +388,10 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
     }
 
     private void makeIntervalsKnown() {
-        if (!intervalsKnown) {
+        if (!treeIntervals.intervalsKnown) {
             wrapSetupIntervals();
             setupGMRFWeights();
-            intervalsKnown = true;
+            treeIntervals.intervalsKnown = true;
         }
     }
 
@@ -419,274 +404,6 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
         makeIntervalsKnown();
         return coalescentIntervals[i];
     }
-
-//    private class XTreeIntervals {
-//
-//        public XTreeIntervals(double[] intervals, int[] lineageCounts) {
-//            this.intervals = intervals;
-//            this.lineagesCount = lineageCounts;
-//        }
-//
-//        int nIntervals;
-//        final int[] lineagesCount;
-//        final double[] intervals;
-//
-//    }
-//
-//
-//    /**
-//     * Recalculates all the intervals from the tree model.
-//     * GL: made public, to give BayesianSkylineGibbsOperator access
-//     */
-//    public final void setupIntervals() {
-//
-//        if (intervals == null) {
-//            int maxIntervalCount = tree.getNodeCount();
-//
-//            intervals = new double[maxIntervalCount];
-//            lineageCounts = new int[maxIntervalCount];
-//            storedIntervals = new double[maxIntervalCount];
-//            storedLineageCounts = new int[maxIntervalCount];
-//        }
-//
-//        XTreeIntervals ti = new XTreeIntervals(intervals, lineageCounts);
-//        getTreeIntervals(tree, getMRCAOfCoalescent(tree), getExcludedMRCAs(tree), ti);
-//        intervalCount = ti.nIntervals;
-//
-//        intervalsKnown = true;
-//    }
-    
-    
-    // **************************************************************
-    // Extendable methods
-    // **************************************************************
-
-//    /**
-//     * @param tree given tree
-//     * @return the node ref of the MRCA of this coalescent prior in the given tree (i.e. root of tree)
-//     */
-//    public Node getMRCAOfCoalescent(Tree tree) {
-//        return tree.getRoot();
-//    }
-//
-//    /**
-//     * @param tree given tree
-//     * @return an array of noderefs that represent the MRCAs of subtrees to exclude from coalescent prior.
-//     *         May return null if no subtrees should be excluded.
-//     */
-//    public Node [] getExcludedMRCAs(Tree tree) {
-//        return null;
-//    }
-//
-//    /**
-//     * Extract coalescent times and tip information into ArrayList times from tree.
-//     * Upon return times contain the time of each node in the subtree below top, and at the corrosponding index
-//     * of childs is the descendent count for that time.
-//     *
-//     * @param top          the node to start from
-//     * @param excludeBelow an optional array of nodes to exclude (corresponding subtrees) from density.
-//     * @param tree         given tree
-//     * @param times        array to fill with times
-//     * @param childs       array to fill with descendents count
-//     */
-//    private static void collectAllTimes(Tree tree, Node top, Node[] excludeBelow,
-//                                        ArrayList<Double> times, ArrayList<Integer> childs) {
-//
-//        times.add(new Double(top.getHeight()));
-//        childs.add(top.getChildCount());
-//
-//        for (int i = 0; i < top.getChildCount(); i++) {
-//            Node child = top.getChild(i);
-//            if (excludeBelow == null) {
-//                collectAllTimes(tree, child, excludeBelow, times, childs);
-//            } else {
-//                // check if this subtree is included in the coalescent density
-//                boolean include = true;
-//                for (Node anExcludeBelow : excludeBelow) {
-//                    if (anExcludeBelow.getNr() == child.getNr()) {
-//                        include = false;
-//                        break;
-//                    }
-//                }
-//                if (include)
-//                    collectAllTimes(tree, child, excludeBelow, times, childs);
-//            }
-//        }
-//    }
-//
-//    private static void getTreeIntervals(Tree tree, Node root, Node [] exclude, XTreeIntervals ti) {
-//        double MULTIFURCATION_LIMIT = 1e-9;
-//
-//        ArrayList<Double> times = new ArrayList<Double>();
-//        //ArrayList<Double> times = new ArrayList<Double>();
-//        ArrayList<Integer> childs = new ArrayList<Integer>();
-//        collectAllTimes(tree, root, exclude, times, childs);
-//        int[] indices = new int[times.size()];
-//
-//        sort(times, indices);
-//
-//        final double[] intervals = ti.intervals;
-//        final int[] lineageCounts = ti.lineagesCount;
-//
-//        // start is the time of the first tip
-//        double start = times.get(indices[0]).doubleValue();
-//        int numLines = 0;
-//        int i = 0;
-//        int intervalCount = 0;
-//        while (i < times.size()) {
-//
-//            int lineagesRemoved = 0;
-//            int lineagesAdded = 0;
-//
-//            final double finish = times.get(indices[i]).doubleValue();
-//            double next = finish;
-//
-//            while (Math.abs(next - finish) < MULTIFURCATION_LIMIT) {
-//                final int children = childs.get(indices[i]);
-//                if (children == 0) {
-//                    lineagesAdded += 1;
-//                } else {
-//                    lineagesRemoved += (children - 1);
-//                }
-//                i += 1;
-//                if (i == times.size()) break;
-//
-//                next = times.get(indices[i]).doubleValue();
-//            }
-//            //System.out.println("time = " + finish + " removed = " + lineagesRemoved + " added = " + lineagesAdded);
-//            if (lineagesAdded > 0) {
-//
-//                if (intervalCount > 0 || ((finish - start) > MULTIFURCATION_LIMIT)) {
-//                    intervals[intervalCount] = finish - start;
-//                    lineageCounts[intervalCount] = numLines;
-//                    intervalCount += 1;
-//                }
-//
-//                start = finish;
-//            }
-//            // add sample event
-//            numLines += lineagesAdded;
-//
-//            if (lineagesRemoved > 0) {
-//
-//                intervals[intervalCount] = finish - start;
-//                lineageCounts[intervalCount] = numLines;
-//                intervalCount += 1;
-//                start = finish;
-//            }
-//            // coalescent event
-//            numLines -= lineagesRemoved;
-//        }
-//
-//        ti.nIntervals = intervalCount;
-//    }
-//
-//    public static void sort(@SuppressWarnings("rawtypes") List<Double> list, int[] indices) {
-//
-//        // ensures we are starting with valid indices
-//        for (int i = 0; i < indices.length; i++) {
-//            indices[i] = i;
-//        }
-//
-//        int temp;
-//        int j, n = list.size();
-//
-//        // turn input array into a heap
-//        for (j = n / 2; j > 0; j--) {
-//        	adjust(list, indices, j, n);
-//        }
-//
-//        // remove largest elements and put them at the end
-//        // of the unsorted region until you are finished
-//        for (j = n - 1; j > 0; j--) {
-//            temp = indices[0];
-//            indices[0] = indices[j];
-//            indices[j] = temp;
-//            adjust(list, indices, 1, j);
-//        }
-//    }
-//    @SuppressWarnings("unchecked")
-//    private static void adjust(@SuppressWarnings("rawtypes") List<Double> list, int[] indices, int lower, int upper) {
-//
-//        int j, k;
-//        int temp;
-//
-//        j = lower;
-//        k = lower * 2;
-//
-//        while (k <= upper) {
-//            if ((k < upper) && (list.get(indices[k - 1]).compareTo(list.get(indices[k])) < 0)) {
-//                k += 1;
-//            }
-//            if (list.get(indices[j - 1]).compareTo(list.get(indices[k - 1])) < 0) {
-//                temp = indices[j - 1];
-//                indices[j - 1] = indices[k - 1];
-//                indices[k - 1] = temp;
-//            }
-//            j = k;
-//            k *= 2;
-//        }
-//    }
-//
-//    /**
-//     * @param i interval index
-//     * @return the number coalescent events in an interval
-//     */
-//    public final int getCoalescentEvents(int i) {
-//
-//        if (i >= intervalCount) throw new IllegalArgumentException();
-//        if (i < intervalCount - 1) {
-//            return lineageCounts[i] - lineageCounts[i + 1];
-//        } else {
-//            return lineageCounts[i] - 1;
-//        }
-//    }
-//
-//    /**
-//     * @param i interval index
-//     * @return the type of interval observed.
-//     */
-//    public final IntervalType getIntervalType(int i) {
-//
-//        if (i >= intervalCount) throw new IllegalArgumentException();
-//        int numEvents = getCoalescentEvents(i);
-//
-//        if (numEvents > 0) return IntervalType.COALESCENT;
-//        else if (numEvents < 0) return IntervalType.SAMPLE;
-//        else return IntervalType.NOTHING;
-//    }
-//
-//    /**
-//     * Gets an interval.
-//     *
-//     * @param i index of interval
-//     * @return interval length
-//     */
-//    public final double getInterval(int i) {
-//        if (i >= intervalCount) throw new IllegalArgumentException();
-//        return intervals[i];
-//    }
-//
-//    /**
-//     * @return number of intervals
-//     */
-//    public final int getIntervalCount() {
-//        return intervalCount;
-//    }
-//
-//    /**
-//     * Returns the number of uncoalesced lineages within this interval.
-//     * Required for s-coalescents, where new lineages are added as
-//     * earlier samples are come across.
-//     *
-//     * @param i lineage index
-//     * @return number of uncoalesced lineages within this interval.
-//     */
-//    public final int getLineageCount(int i) {
-//        if (i >= intervalCount) throw new IllegalArgumentException();
-//        return lineageCounts[i];
-//    }
-//
 
     /*public int getCoalescentIntervalLineageCount(int i) {
         throw new RuntimeException("Not yet implemented");
@@ -734,85 +451,62 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
         return a;
     }
 
-//    protected void storeState() {
-//        super.storeState();
-//        System.arraycopy(coalescentIntervals, 0, storedCoalescentIntervals, 0, coalescentIntervals.length);
-//        System.arraycopy(sufficientStatistics, 0, storedSufficientStatistics, 0, sufficientStatistics.length);
-//        storedWeightMatrix = weightMatrix.copy();
-//        storedLogFieldLikelihood = logFieldLikelihood;
-//    }
 	@Override
 	public void store() {
-		super.store();
-		System.arraycopy(coalescentIntervals, 0, storedCoalescentIntervals, 0, coalescentIntervals.length);
-		System.arraycopy(sufficientStatistics, 0, storedSufficientStatistics, 0, sufficientStatistics.length);
-		storedWeightMatrix = weightMatrix.copy();
+        super.store();
+        System.arraycopy(coalescentIntervals, 0, storedCoalescentIntervals, 0, coalescentIntervals.length);
+        System.arraycopy(sufficientStatistics, 0, storedSufficientStatistics, 0, sufficientStatistics.length);
+        storedWeightMatrix = weightMatrix.copy();
         storedLogFieldLikelihood = logFieldLikelihood;
-
-        System.arraycopy(intervals, 0, storedIntervals, 0, intervals.length);
-        System.arraycopy(lineageCounts, 0, storedLineageCounts, 0, lineageCounts.length);
-        storedIntervalsKnown = intervalsKnown;
-        storedIntervalCount = intervalCount;
-	}
-
-//    protected void restoreState() {
-//        super.restoreState();
-//        // TODO Just swap pointers
-//        System.arraycopy(storedCoalescentIntervals, 0, coalescentIntervals, 0, storedCoalescentIntervals.length);
-//        System.arraycopy(storedSufficientStatistics, 0, sufficientStatistics, 0, storedSufficientStatistics.length);
-//        weightMatrix = storedWeightMatrix;
-//        logFieldLikelihood = storedLogFieldLikelihood;
-//    }
-	@Override
-	public void restore() {
-		super.restore();
-		System.arraycopy(storedCoalescentIntervals, 0, coalescentIntervals, 0, storedCoalescentIntervals.length);
-		System.arraycopy(storedSufficientStatistics, 0, sufficientStatistics, 0, storedSufficientStatistics.length);
-		weightMatrix = storedWeightMatrix;
-        logFieldLikelihood = storedLogFieldLikelihood;
-
-        System.arraycopy(storedIntervals, 0, intervals, 0, storedIntervals.length);
-        System.arraycopy(storedLineageCounts, 0, lineageCounts, 0, storedLineageCounts.length);
-        intervalsKnown = storedIntervalsKnown;
-        intervalCount = storedIntervalCount;
-	}
-
-	@Override
-	protected boolean requiresRecalculation() {
-		boolean isDirty = false;
-        final TreeIntervals ti = treeIntervalsInput.get();
-        if (ti != null) {
-            //boolean d = ti.isDirtyCalculation();
-            //assert d;
-            assert ti.isDirtyCalculation();
-            isDirty = true;
-        } else {
-        	isDirty = treeInput.get().somethingIsDirty();
-        }
-
-		isDirty =  isDirty || 
-			popSizeParameter.somethingIsDirty() ||
-			groupSizeParameter.somethingIsDirty() ||
-			precisionParameter.somethingIsDirty() ||
-			lambdaParameter.somethingIsDirty()
-//			dMatrix.somethingIsDirty()
-//			betaParameter.somethingIsDirty();
-			;
-
-		if (isDirty) {
-			likelihoodKnown = false;
-			intervalsKnown = false;
-		}
-		return isDirty;
-	}
-
-    protected void handleVariableChangedEvent(Variable variable, int index, Parameter.ChangeType type) {
-        likelihoodKnown = false;
-        // Parameters (precision and popsizes do not change intervals or GMRF Q matrix
     }
 
+	@Override
+	public void restore() {
+        super.restore();
+        // TODO Just swap pointers
+        System.arraycopy(storedCoalescentIntervals, 0, coalescentIntervals, 0, storedCoalescentIntervals.length);
+        System.arraycopy(storedSufficientStatistics, 0, sufficientStatistics, 0, storedSufficientStatistics.length);
+        weightMatrix = storedWeightMatrix;
+        logFieldLikelihood = storedLogFieldLikelihood;
+
+    }
+
+//	@Override
+//	protected boolean requiresRecalculation() {
+//		boolean isDirty = false;
+//        final TreeIntervals ti = treeIntervalsInput.get();
+//        if (ti != null) {
+//            //boolean d = ti.isDirtyCalculation();
+//            //assert d;
+//            assert ti.isDirtyCalculation();
+//            isDirty = true;
+//        } else {
+//        	isDirty = treeInput.get().somethingIsDirty();
+//        }
+//
+//		isDirty =  isDirty ||
+//			popSizeParameter.somethingIsDirty() ||
+//			groupSizeParameter.somethingIsDirty() ||
+//			precisionParameter.somethingIsDirty() ||
+//			lambdaParameter.somethingIsDirty()
+////			dMatrix.somethingIsDirty()
+////			betaParameter.somethingIsDirty();
+//			;
+//
+//		if (isDirty) {
+//			likelihoodKnown = false;
+//			intervalsKnown = false;
+//		}
+//		return isDirty;
+//	}
+
+//    protected void handleVariableChangedEvent(Variable variable, int index, Parameter.ChangeType type) {
+//        likelihoodKnown = false;
+//        // Parameters (precision and popsizes do not change treeIntervals or GMRF Q matrix
+//    }
+
 	/**
-	 * Calculates the log likelihood of this set of coalescent intervals,
+	 * Calculates the log likelihood of this set of coalescent treeIntervals,
 	 * given a demographic model.
      * @return coalescent part of density
 	 */
@@ -919,17 +613,6 @@ public class GMRFSkyrideLikelihood extends TreeDistribution  {
 
 	}
 
-	// ****************************************************************
-	// Private and protected stuff
-	// ****************************************************************
-//    public static DenseVector newDenseVector(RealParameter x) {
-//        Double [] Gammas = x.getValues();
-//        double [] gammas = new double [Gammas.length];
-//        for (int i = 0; i < gammas.length; i++) {
-//        	gammas[i] = Gammas[i];
-//        }
-//        return new DenseVector(gammas);
-//    }
 }
 
 /*
